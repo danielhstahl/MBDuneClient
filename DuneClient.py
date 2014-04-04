@@ -1,4 +1,5 @@
-#This python client is intended to control the Dune media player through IP messages.  Obviously this can be easily edited to control any IP controlled media player.  The code is heavily borrowed from the excellent XBMB3C client.  This client is controllable ONLY from another client.  If you start or stop a movie from the Dune remote the MediaBrowser server will not know about it.  To start this script type in a console "python DuneClient.py" assuming python is installed
+#!/usr/bin/python
+#This python client is intended to control the Dune media player through IP messages.  Obviously this can be easily edited to control any IP controlled media player.  The code is heavily borrowed from the excellent XBMB3C client.  This client is controllable ONLY from another client.  If you start or stop a movie from the Dune remote the MediaBrowser server will not know about it.
 import urllib
 import httplib
 import os
@@ -34,11 +35,27 @@ smbuser='user' #user name to access computer where media is stored
 smbpsswd='psswd'  #password to access computer where media is stored
 #End edit
 
+
+link1="http://"+MBIP+":"+MBPort+"/mediabrowser/Users/Public?format=json" 
+urlresponse1=urllib2.urlopen(link1)
+dt1=json.load(urlresponse1)
+its1=dt1[0]["Id"]
+print its1
+userid = its1
+
 def getMachineId():
     return "%012X"%get_mac()
     
 def getVersion():
     return "0.8.5"
+
+def getAuthHeader():
+   deviceName="DunePlayer"
+   txt_mac = getMachineId()
+   version = getVersion()  
+   authString = "MediaBrowser UserId=\"" + userid + "\",Client=\"Dune\",Device=\"" + deviceName + "\",DeviceId=\"" + txt_mac + "\",Version=\"" + version + "\""
+   headers = {'Accept-encoding': 'gzip', 'Authorization' : authString}
+   return headers 
 
 #################################################################################################
 # WebSocket Client thread
@@ -53,34 +70,28 @@ class WebSocketThread(threading.Thread):
     def playbackStarted(self, itemId):
         if(self.client != None):
             self.isstop=False
-            messageData = {}
-            messageData["MessageType"] = "PlaybackStart"
-            messageData["Data"] = itemId[0] + "|true|audio,video"
-            messageString = json.dumps(messageData)
-            self.client.send(messageString)
+            print "PlayBack Started!"
+            link='http://'+MBIP+':'+MBPort+'/mediabrowser/Users/'+userid+'/PlayingItems/'+itemId[0]
+            print link
+            resp = requests.post(link, data='', headers=getAuthHeader())
         else:
-            print "error"
+            print "errorStart"
     def playbackStopped(self, ticks):
         if(self.client != None):
             self.isstop=True
-            messageData = {}
-            messageData["MessageType"] = "PlaybackStopped"
-            messageData["Data"] = self.itemID[0] + "|" + str(ticks)
-            messageString = json.dumps(messageData)
-            self.client.send(messageString)
+            link='http://'+MBIP+':'+MBPort+'/mediabrowser/Users/'+userid+'/PlayingItems/'+self.itemID[0]+'?PositionTicks=0'
+            resp = requests.delete(link, data='', headers=getAuthHeader())
         else:
-            print "error"
+            print "errorStopped"
     def sendProgressUpdate(self, ticks):
         if(self.client != None):
-            messageData = {}
-            messageData["MessageType"] = "PlaybackProgress"
-            messageData["Data"] = self.itemID[0] + "|" + str(ticks) + "|false|false"
-            messageString = json.dumps(messageData)
-            self.client.send(messageString)
+            link='http://'+MBIP+':'+MBPort+'/mediabrowser/Users/'+userid+'/PlayingItems/'+self.itemID[0]+'/Progress?PositionTicks='+str(ticks)
+            print link
+            resp = requests.post(link, data='', headers=getAuthHeader())
         else:
-            print "error"
+            print "errorUpdate"
     def stopClient(self):
-        # stopping the client is tricky, first set keep_running to false and then trigger one 
+        # stopping the client is tricky, first set   to false and then trigger one 
         # more message by requesting one SessionsStart message, this causes the 
         # client to receive the message and then exit
         if(self.client != None):
@@ -91,7 +102,7 @@ class WebSocketThread(threading.Thread):
             messageString = json.dumps(messageData)
             self.client.send(messageString)
         else:
-            print "error"
+            print "errorstop"
     def on_message(self, ws, message):
         result = json.loads(message)
         messageType = result.get("MessageType")
@@ -156,16 +167,16 @@ class WebSocketThread(threading.Thread):
             print link
             url_response = urllib2.urlopen(link)
     def on_error(self, ws, error):
-        print "error"
+        print error
     def on_close(self, ws):
-        print "error"
+        print "close"
     def on_open(self, ws):
         machineId = getMachineId()
         version = getVersion()
         messageData = {}
         messageData["MessageType"] = "Identity"
         deviceName = "DunePlayer"
-        messageData["Data"] = "Dune|" + machineId + "|" + version + "|" + deviceName
+        messageData["Data"] = "Dune|" + machineId + "|" + version + "|" + deviceName #does this do anything?
         messageString = json.dumps(messageData)
         ws.send(messageString)
 
@@ -212,6 +223,9 @@ monitor = managePlayback()
 while True:
     try:
         playTime = monitor.getTime()
+        playTimeOld=playTime
+        print playTime
+        print newWebSocketThread.isstop
         if(newWebSocketThread.itemID!=None and newWebSocketThread.isstop!=True):
             newWebSocketThread.sendProgressUpdate(str(int(playTime * 10000000)))
       
