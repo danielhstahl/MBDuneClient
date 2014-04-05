@@ -8,16 +8,15 @@ import requests
 
 import threading
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import xml.etree.ElementTree as xml
-
+import sys
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 import mimetypes
 from threading import Thread
 from SocketServer import ThreadingMixIn
 from urlparse import parse_qs
 from urllib import urlretrieve
-
 from random import randint
 import random
 import urllib2
@@ -36,13 +35,19 @@ smbpsswd='psswd'  #password to access computer where media is stored
 #End edit
 
 
-link1="http://"+MBIP+":"+MBPort+"/mediabrowser/Users/Public?format=json" 
-urlresponse1=urllib2.urlopen(link1)
-dt1=json.load(urlresponse1)
-its1=dt1[0]["Id"]
-print its1
-userid = its1
-
+defaulttimeout=3
+# socket.setdefaulttimeout(defaulttimeout)
+try:
+    link1="http://"+MBIP+":"+MBPort+"/mediabrowser/Users/Public?format=json" 
+    urlresponse1=urllib2.urlopen(link1, None, defaulttimeout)
+    dt1=json.load(urlresponse1)
+    userid=dt1[0]["Id"]
+    print "UserID:  " +userid
+    print "Successful connection!"
+except Exception, e:
+    print str(e)
+    sys.exit("Could not connect to Server!")
+    
 def getMachineId():
     return "%012X"%get_mac()
     
@@ -72,7 +77,6 @@ class WebSocketThread(threading.Thread):
             self.isstop=False
             print "PlayBack Started!"
             link='http://'+MBIP+':'+MBPort+'/mediabrowser/Users/'+userid+'/PlayingItems/'+itemId[0]
-            print link
             resp = requests.post(link, data='', headers=getAuthHeader())
         else:
             print "errorStart"
@@ -81,12 +85,12 @@ class WebSocketThread(threading.Thread):
             self.isstop=True
             link='http://'+MBIP+':'+MBPort+'/mediabrowser/Users/'+userid+'/PlayingItems/'+self.itemID[0]+'?PositionTicks=0'
             resp = requests.delete(link, data='', headers=getAuthHeader())
+            print ""
         else:
             print "errorStopped"
     def sendProgressUpdate(self, ticks):
         if(self.client != None):
             link='http://'+MBIP+':'+MBPort+'/mediabrowser/Users/'+userid+'/PlayingItems/'+self.itemID[0]+'/Progress?PositionTicks='+str(ticks)
-            print link
             resp = requests.post(link, data='', headers=getAuthHeader())
         else:
             print "errorUpdate"
@@ -168,18 +172,27 @@ class WebSocketThread(threading.Thread):
             url_response = urllib2.urlopen(link)
     def on_error(self, ws, error):
         print error
+        time.sleep(10) #give time for server to restart
     def on_close(self, ws):
-        print "close"
+        self.createsocket()
     def on_open(self, ws):
         machineId = getMachineId()
         version = getVersion()
         messageData = {}
         messageData["MessageType"] = "Identity"
         deviceName = "DunePlayer"
-        messageData["Data"] = "Dune|" + machineId + "|" + version + "|" + deviceName #does this do anything?
+        messageData["Data"] = "Dune|" + machineId + "|" + version + "|" + deviceName 
         messageString = json.dumps(messageData)
         ws.send(messageString)
-
+    def createsocket(self):
+        webSocketUrl = "ws://" +  MBIP + ":" + MBPort + "/mediabrowser"
+        self.client = websocket.WebSocketApp(webSocketUrl,
+                                    on_message = self.on_message,
+                                    on_error = self.on_error,
+                                    on_close = self.on_close)
+        self.client.on_open = self.on_open
+        self.client.run_forever()
+        
     def run(self):
         level = 0 #addonSettings.getSetting('logLevel')
         self.logLevel = 0
@@ -189,13 +202,8 @@ class WebSocketThread(threading.Thread):
             websocket.enableTrace(True)        
      
         #Make a call to /System/Info. WebSocketPortNumber is the port hosting the web socket.
-        webSocketUrl = "ws://" +  MBIP + ":" + MBPort + "/mediabrowser"
-        self.client = websocket.WebSocketApp(webSocketUrl,
-                                    on_message = self.on_message,
-                                    on_error = self.on_error,
-                                    on_close = self.on_close)
-        self.client.on_open = self.on_open
-        self.client.run_forever()
+        self.createsocket()
+        
 
 newWebSocketThread = WebSocketThread()
 newWebSocketThread.start()
@@ -224,11 +232,13 @@ while True:
     try:
         playTime = monitor.getTime()
         playTimeOld=playTime
-        print playTime
-        print newWebSocketThread.isstop
+        
         if(newWebSocketThread.itemID!=None and newWebSocketThread.isstop!=True):
+            m, s = divmod(playTime, 60)
+            h, m = divmod(m, 60)
             newWebSocketThread.sendProgressUpdate(str(int(playTime * 10000000)))
-      
+            print "Playback Time:  " + "%d:%02d:%02d" % (h, m, s) + "\r",
+            sys.stdout.flush()
         time.sleep(.5)
     except Exception, e:
         print str(e)
