@@ -36,7 +36,6 @@ smbpsswd='psswd'  #password to access computer where media is stored
 
 
 defaulttimeout=3
-# socket.setdefaulttimeout(defaulttimeout)
 try:
     link1="http://"+MBIP+":"+MBPort+"/mediabrowser/Users/Public?format=json" 
     urlresponse1=urllib2.urlopen(link1, None, defaulttimeout)
@@ -62,6 +61,10 @@ def getAuthHeader():
    headers = {'Accept-encoding': 'gzip', 'Authorization' : authString}
    return headers 
 
+def restart_program():
+    python = sys.executable
+    os.execl(python, python, * sys.argv)
+   
 #################################################################################################
 # WebSocket Client thread
 #################################################################################################
@@ -174,7 +177,7 @@ class WebSocketThread(threading.Thread):
         print error
         time.sleep(10) #give time for server to restart
     def on_close(self, ws):
-        self.createsocket()
+        restart_program()
     def on_open(self, ws):
         machineId = getMachineId()
         version = getVersion()
